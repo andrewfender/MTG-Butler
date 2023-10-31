@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+
+<HEAD>
+
+<title>MTG Butler</title>
+<script type="text/javascript" src="main.js"></script>
+<link rel="stylesheet" href="style.css"/>
+
+</HEAD>
+
+
+
+<BODY>
+<div id="page-wrapper">
+
+<div id="page-overlay" class="load-overlay"></div>
+
+<div id="search">
+  Enter a Scryfall search term. Results will be grouped by set (most recent first) and ordered by EDHREC rank.<br/><br/>
+  <form><input id="search-box" type="text" placeholder="ci=boros t:creature cmc>5"/> <button id="search-button">Search</button></form>
+  <span class="small-text">The "order:" search parameter will be ignored. Digital-only cards will not be displayed. Cards not legal in commander (e.g. silver border) WILL be displayed.</span>
+</div>
+<hr>
+<div id="results-counter">Results: 0</div>
+
+<div id="card-list">
+</div>
+
+</div>
+</BODY>
+
+</html>
