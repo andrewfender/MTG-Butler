@@ -1,57 +1,21 @@
-body {
-  background: #222;
-  color: #ccc;
-  font-family: sans-serif;
-}
-
-a {
-  color: #fff;
-}
-
-div#page-overlay {
-  display: none;
-}
-
-div.load-overlay {
-  display: block !important;
-  position: absolute;
-  z-index: 999;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  background: rgba(0, 0, 0, 0.5);
-  text-align: center;
-  line-height: 100vh;
-  font-size: 3em;
-}
-
-div#page-wrapper {
-  width: 100%;
-  max-width: 1050px;
-  margin: 20px auto;
-}
+/* Search & results */
 
 div#search {
   width: 100%;
-}
-
-hr {
-  border-style: solid;
 }
 
 input#search-box {
   width: 500px;
 }
 
-div#results-counter {
-  font-size: 0.8em;
-  margin-bottom: 10px;
-}
-
 span.small-text {
   font-size: 0.75em;
   color: #999;
+}
+
+div#results-counter {
+  font-size: 0.8em;
+  margin-bottom: 10px;
 }
 
 div#card-list {
