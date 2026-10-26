@@ -9,6 +9,7 @@ const docSearchError = document.getElementById("search-error");
 const docLoadMore = document.getElementById("load-more");
 
 let spinnerTimer;
+let heldHeight = 0;  // Page height held after a set closes (see holdHeight)
 
 // State of the current search (see newSearch); null until the first search
 let search = null;
@@ -54,11 +55,26 @@ docCardList.addEventListener("toggle", (event) => {
   });
 }, true);
 
+// Closing a set shortens the page, and near the bottom that would drag the view up with it. So when a set
+// closes, the page keeps its height for now; the spare space goes again as the page is scrolled back up.
+docCardList.addEventListener("click", (event) => {
+  const summary = event.target.closest("summary");
+  if (summary && summary.parentElement.open) holdHeight(scrollY + innerHeight);
+});
+window.addEventListener("scroll", () => {
+  if (heldHeight > scrollY + innerHeight) holdHeight(scrollY + innerHeight);
+});
+
 // Back/forward buttons restore the search from the URL
 window.addEventListener("popstate", loadFromURL);
 
 // Run the search linked in the URL, if any
 loadFromURL();
+
+function holdHeight(height) {
+  heldHeight = height;
+  document.documentElement.style.minHeight = height ? `${height}px` : "";
+}
 
 function setLoading(loading) {
   // Only show the spinner if loading takes a moment, so quick loads don't flash it
@@ -93,6 +109,7 @@ function clearResults() {
   docSearchError.textContent = "";
   docResultsCounter.textContent = "Results: 0";
   docLoadMore.hidden = true;
+  holdHeight(0);
 }
 
 function newSearch(query) {
