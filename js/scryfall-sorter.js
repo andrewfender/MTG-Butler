@@ -12,11 +12,12 @@ var docCardList;
 var docResultsCounter;
 var docSearchBox;
 var docSearchError;
-var docPagers;
+var docLoadMore;
 const dateNow = Date.now();
 const fetchOptions = { headers: { "Accept": "application/json" } };
 
-// Pages hold at most this many cards, except a single set larger than this, which gets a page of its own
+// Results load a page at a time. Pages hold at most this many cards, except a single set larger than
+// this, which gets a page of its own.
 const MAX_CARDS_PER_PAGE = 200;
 
 window.onload = () => {
@@ -25,23 +26,17 @@ window.onload = () => {
   docResultsCounter = document.getElementById("results-counter");
   docSearchBox = document.getElementById("search-box");
   docSearchError = document.getElementById("search-error");
-  docPagers = document.querySelectorAll(".pager");
+  docLoadMore = document.getElementById("load-more");
 
   const searchButton = document.getElementById("search-button");
   searchButton.addEventListener("click", (event) => {
     event.preventDefault();
-    doSearch(docSearchBox.value.trim(), 0, true);
+    doSearch(docSearchBox.value.trim(), true);
   });
 
-  docPagers.forEach((pager) => {
-    pager.addEventListener("click", (event) => {
-      const button = event.target.closest("button[data-page]");
-      if (!button || button.disabled) return;
-      goToPage(parseInt(button.dataset.page), true);
-    });
-  });
+  docLoadMore.addEventListener("click", loadMore);
 
-  // Back/forward buttons restore the search and page from the URL
+  // Back/forward buttons restore the search from the URL
   window.addEventListener("popstate", loadFromURL);
 
   // Fetch all (main) sets in reverse chronological order
@@ -101,35 +96,19 @@ function showError(message) {
   docSearchError.textContent = message;
 }
 
-// URL format: ?q=<search>&page=<page number, from 1>
+// URL format: ?q=<search>
 function loadFromURL() {
   if (!gotSets) return;
 
   const params = new URLSearchParams(window.location.search);
   const query = (params.get("q") || "").trim();
-  const page = Math.max((parseInt(params.get("page")) || 1) - 1, 0);
 
   docSearchBox.value = query;
   if (query === "") {
     clearResults();
     search = null;
-  } else if (search && search.query === query) {
-    goToPage(page, false);
-  } else {
-    doSearch(query, page, false);
-  }
-}
-
-function updateURL(replace) {
-  const params = new URLSearchParams();
-  params.set("q", search.query);
-  params.set("page", search.page + 1);
-  const url = `${window.location.pathname}?${params}`;
-
-  if (replace) {
-    history.replaceState(null, "", url);
-  } else {
-    history.pushState(null, "", url);
+  } else if (!search || search.query !== query) {
+    doSearch(query, false);
   }
 }
 
@@ -137,17 +116,15 @@ function clearResults() {
   docCardList.innerHTML = "";
   docSearchError.textContent = "";
   docResultsCounter.innerHTML = `Results: 0`;
-  docPagers.forEach((pager) => {
-    pager.innerHTML = "";
-  });
+  docLoadMore.hidden = true;
 }
 
-function newSearch(query, page) {
+function newSearch(query) {
   return {
     id: ++searchCount,
     query,
-    page,               // Index of the page the user wants to see
     pages: [],          // Pages fetched so far; each is final once it's here
+    shownPages: 0,      // Pages already added to the list
     groups: new Map(),  // Set groups not yet placed on a page, by set code
     streamDate: null,   // Release date of the oldest card fetched so far
     nextURL: null,      // Scryfall page to resume from
@@ -158,67 +135,60 @@ function newSearch(query, page) {
   };
 }
 
-function doSearch(query, page, updateHistory) {
+function doSearch(query, updateHistory) {
   if (!gotSets) return;
   if (!query || query === "") return;
 
   // Any fetches still running for an earlier search stop when they see this new state
   clearResults();
-  search = newSearch(query, page);
-  if (updateHistory) updateURL(false);
+  search = newSearch(query);
+  if (updateHistory) history.pushState(null, "", `${window.location.pathname}?${new URLSearchParams({ q: query })}`);
 
   const searchURI = encodeURIComponent(query + " is:firstprint order:released dir:desc -is:digital");
   search.nextURL = `https://api.scryfall.com/cards/search?q=${searchURI}`;
 
-  goToPage(page, false);
+  loadMore();
 }
 
-function goToPage(page, updateHistory) {
-  if (!search) return;
+// Fetch from where the last page left off until the next page is complete, then add it below the results so far
+function loadMore() {
   const state = search;
+  if (!state || state.fetching) return;
 
-  state.page = Math.max(page, 0);
-  if (updateHistory) updateURL(false);
-
-  if (state.page < state.pages.length) {
-    renderPage(state, true);
-    renderPager();
-    return;
-  }
-
-  // Fetch from where the last page left off until the requested page is complete
-  if (updateHistory) window.scrollTo(0, 0);
   setLoading(true);
-  ensurePage(state, state.page)
+  docLoadMore.disabled = true;
+  docLoadMore.textContent = "Loading...";
+  ensurePage(state, state.shownPages)
   .then(() => {
-    // Ignore if the user has since moved on to a page that's still loading
-    if (state !== search || (state.page >= state.pages.length && !state.exhausted)) return;
+    if (state !== search) return;
 
     if (state.pages.length === 0) {
       showError("No cards found.");
-      renderPager();
       return;
     }
 
-    if (state.page >= state.pages.length) {
-      // Asked for a page past the end of the results
-      state.page = state.pages.length - 1;
-      updateURL(true);
+    if (state.shownPages < state.pages.length) {
+      renderPage(state.pages[state.shownPages]);
+      state.shownPages++;
     }
-
-    renderPage(state, updateHistory);
-    renderPager();
   })
   .catch((error) => {
     if (state !== search) return;
     showError(error.message || "Couldn't reach Scryfall. Please try again.");
-    renderPager();
+  })
+  .finally(() => {
+    if (state !== search) return;
+    setLoading(false);
+    docLoadMore.disabled = false;
+    docLoadMore.textContent = "Load more";
+    // Hidden once everything is shown, or if the search failed before showing anything
+    docLoadMore.hidden = state.shownPages === 0 || (state.exhausted && state.shownPages >= state.pages.length);
   });
 }
 
 async function ensurePage(state, index) {
   while (state.pages.length <= index && !state.exhausted) {
-    // Clicking Next again while a request is running waits on that request instead of starting another
+    // A new caller while a request is running waits on that request instead of starting another
     if (!state.fetching) {
       state.fetching = fetchCards(state).finally(() => {
         state.fetching = null;
@@ -340,11 +310,9 @@ function takeReadyPages(state) {
   });
 }
 
-function renderPage(state, scrollToTop) {
-  docCardList.innerHTML = "";
-
+function renderPage(page) {
   // Print card images, grouped by set, ordered by EDHREC rank
-  state.pages[state.page].groups.forEach((group) => {
+  page.groups.forEach((group) => {
     const set = group.set;
 
     // Create list of card divs
@@ -376,52 +344,5 @@ function renderPage(state, scrollToTop) {
     </section>
     `
     );
-  });
-
-  if (scrollToTop) window.scrollTo(0, 0);
-  setLoading(false);
-}
-
-function renderPager() {
-  const state = search;
-  if (!state || state.pages.length === 0) {
-    docPagers.forEach((pager) => {
-      pager.innerHTML = "";
-    });
-    return;
-  }
-
-  const pageButton = (index, label, disabled) =>
-    `<button type="button" data-page="${index}"${index === state.page ? ` class="current-page"` : ""}${disabled ? " disabled" : ""}>${label}</button>`;
-
-  // Numbered buttons for the first, last and nearby loaded pages, with gaps elided
-  const loaded = state.pages.length;
-  const shown = [];
-  for (let i = 0; i < loaded; i++) {
-    if (i === 0 || i === loaded - 1 || Math.abs(i - state.page) <= 2) shown.push(i);
-  }
-  let numbers = "";
-  shown.forEach((index, i) => {
-    if (i > 0 && index - shown[i - 1] > 1) numbers += `<span class="pager-gap">...</span>`;
-    numbers += pageButton(index, index + 1, false);
-  });
-  // Pages past the last loaded one are fetched when Next reaches them
-  if (!state.exhausted) numbers += `<span class="pager-gap">...</span>`;
-
-  const isLastPage = state.exhausted && state.page >= loaded - 1;
-  const buttons = pageButton(state.page - 1, "Prev", state.page === 0)
-    + numbers
-    + pageButton(state.page + 1, "Next", isLastPage);
-
-  // Summary, e.g. "Page 2 of 7 · cards 501–987"
-  let summary = `Page ${state.page + 1}${state.exhausted ? ` of ${loaded}` : ""}`;
-  if (state.page < loaded) {
-    const firstCard = state.pages.slice(0, state.page).reduce((sum, page) => sum + page.cardCount, 0) + 1;
-    const lastCard = firstCard + state.pages[state.page].cardCount - 1;
-    summary += ` &middot; cards ${firstCard}&ndash;${lastCard}`;
-  }
-
-  docPagers.forEach((pager) => {
-    pager.innerHTML = `<div class="pager-buttons">${buttons}</div><div class="pager-summary">${summary}</div>`;
   });
 }
