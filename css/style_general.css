@@ -11,24 +11,6 @@ a:hover {
   background: rgba(255, 255, 255, 0.2);
 }
 
-div#page-overlay {
-  display: none;
-}
-
-div.load-overlay {
-  display: block !important;
-  position: absolute;
-  z-index: 999;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  background: rgba(0, 0, 0, 0.5);
-  text-align: center;
-  line-height: 100vh;
-  font-size: 3em;
-}
-
 div#page-wrapper {
   width: 100%;
   max-width: 1050px;

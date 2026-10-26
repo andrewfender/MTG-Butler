@@ -12,7 +12,7 @@ span.small-text {
   color: #999;
 }
 
-div#results-counter {
+div#results-bar {
   font-size: 0.8em;
   margin-bottom: 10px;
 }
@@ -132,7 +132,24 @@ div.pager-summary {
   color: #999;
 }
 
-div.page-loading {
-  padding: 20px;
-  text-align: center;
+/* Loading spinner */
+span#loading-spinner {
+  display: none;
+  width: 0.8em;
+  height: 0.8em;
+  margin-left: 6px;
+  vertical-align: -0.1em;
+  border: 2px solid #555;
+  border-top-color: #bbb;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+span#loading-spinner.visible {
+  display: inline-block;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
