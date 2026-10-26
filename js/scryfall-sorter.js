@@ -1,9 +1,5 @@
 const fetchOptions = { headers: { "Accept": "application/json" } };
 
-// Results load a page at a time. Pages hold at most this many cards, except a single set larger than
-// this, which gets a page of its own.
-const MAX_CARDS_PER_PAGE = 200;
-
 // The script is deferred, so the page is already parsed
 const docSpinner = document.getElementById("loading-spinner");
 const docCardList = document.getElementById("card-list");
@@ -106,7 +102,6 @@ function newSearch(query) {
     nextURL: null,      // Scryfall page to resume from
     exhausted: false,   // True once Scryfall has no more results
     loading: false,     // True while a page is loading
-    shownAny: false,
     lastFetch: 0
   };
 }
@@ -125,7 +120,8 @@ function doSearch(query, updateHistory) {
   loadMore();
 }
 
-// Show the next page of results: sets are added as soon as all their cards are in, until the page is full
+// Show the next page of results. Each page is one Scryfall request (175 cards) and shows every set that
+// request completes; a request in the middle of a large set completes none, so another one follows.
 async function loadMore() {
   const state = search;
   if (!state || state.loading) return;
@@ -135,26 +131,20 @@ async function loadMore() {
   docLoadMore.disabled = true;
   docLoadMore.textContent = "Loading...";
   try {
-    let pageCards = 0;
-    while (true) {
-      const group = nextGroup(state);
-      // A set that would overflow the page starts the next one, unless the page is still empty
-      if (group && pageCards > 0 && pageCards + group.cards.length > MAX_CARDS_PER_PAGE) break;
+    let shown = 0;
+    do {
+      await fetchCards(state);
+      if (state !== search) return;
 
-      if (group && isComplete(state, group)) {
+      let group;
+      while ((group = nextGroup(state)) && isComplete(state, group)) {
         renderGroup(group);
         state.groups.delete(group.code);
-        state.shownAny = true;
-        pageCards += group.cards.length;
-      } else if (!state.exhausted) {
-        await fetchCards(state);
-        if (state !== search) return;
-      } else {
-        break;
+        shown++;
       }
-    }
+    } while (shown === 0 && !state.exhausted);
 
-    if (!state.shownAny) showError("No cards found.");
+    if (!docCardList.firstChild) showError("No cards found.");
   } catch (error) {
     if (state !== search) return;
     showError(error.message || "Couldn't reach Scryfall. Please try again.");
@@ -165,7 +155,7 @@ async function loadMore() {
   docLoadMore.disabled = false;
   docLoadMore.textContent = "Load more";
   // Hidden once everything is shown, or if the search failed before showing anything
-  docLoadMore.hidden = !state.shownAny || (state.exhausted && state.groups.size === 0);
+  docLoadMore.hidden = !docCardList.firstChild || state.exhausted;
 }
 
 async function fetchCards(state) {
