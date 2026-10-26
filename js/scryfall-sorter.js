@@ -16,7 +16,7 @@ const dateNow = Date.now();
 const fetchOptions = { headers: { "Accept": "application/json" } };
 
 // Pages hold at most this many cards, except a single set larger than this, which gets a page of its own
-const MAX_CARDS_PER_PAGE = 500;
+const MAX_CARDS_PER_PAGE = 200;
 
 window.onload = () => {
   docPageOverlay = document.getElementById("page-overlay");
