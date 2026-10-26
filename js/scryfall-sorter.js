@@ -101,13 +101,12 @@ function clearResults() {
 function newSearch(query) {
   return {
     query,
-    pages: [],          // Pages fetched so far; each is final once it's here
-    shownPages: 0,      // Pages already added to the list
-    groups: new Map(),  // Set groups not yet placed on a page, by set code
+    groups: new Map(),  // Set groups fetched but not yet shown, by set code
     streamDate: null,   // Release date of the oldest card fetched so far
     nextURL: null,      // Scryfall page to resume from
     exhausted: false,   // True once Scryfall has no more results
-    fetching: null,     // Promise for the Scryfall request in flight
+    loading: false,     // True while a page is loading
+    shownAny: false,
     lastFetch: 0
   };
 }
@@ -126,53 +125,47 @@ function doSearch(query, updateHistory) {
   loadMore();
 }
 
-// Fetch from where the last page left off until the next page is complete, then add it below the results so far
-function loadMore() {
+// Show the next page of results: sets are added as soon as all their cards are in, until the page is full
+async function loadMore() {
   const state = search;
-  if (!state || state.fetching) return;
+  if (!state || state.loading) return;
 
+  state.loading = true;
   setLoading(true);
   docLoadMore.disabled = true;
   docLoadMore.textContent = "Loading...";
-  ensurePage(state, state.shownPages)
-  .then(() => {
-    if (state !== search) return;
+  try {
+    let pageCards = 0;
+    while (true) {
+      const group = nextGroup(state);
+      // A set that would overflow the page starts the next one, unless the page is still empty
+      if (group && pageCards > 0 && pageCards + group.cards.length > MAX_CARDS_PER_PAGE) break;
 
-    if (state.pages.length === 0) {
-      showError("No cards found.");
-      return;
+      if (group && isComplete(state, group)) {
+        renderGroup(group);
+        state.groups.delete(group.code);
+        state.shownAny = true;
+        pageCards += group.cards.length;
+      } else if (!state.exhausted) {
+        await fetchCards(state);
+        if (state !== search) return;
+      } else {
+        break;
+      }
     }
 
-    if (state.shownPages < state.pages.length) {
-      renderPage(state.pages[state.shownPages]);
-      state.shownPages++;
-    }
-  })
-  .catch((error) => {
+    if (!state.shownAny) showError("No cards found.");
+  } catch (error) {
     if (state !== search) return;
     showError(error.message || "Couldn't reach Scryfall. Please try again.");
-  })
-  .finally(() => {
-    if (state !== search) return;
-    setLoading(false);
-    docLoadMore.disabled = false;
-    docLoadMore.textContent = "Load more";
-    // Hidden once everything is shown, or if the search failed before showing anything
-    docLoadMore.hidden = state.shownPages === 0 || (state.exhausted && state.shownPages >= state.pages.length);
-  });
-}
-
-async function ensurePage(state, index) {
-  while (state.pages.length <= index && !state.exhausted) {
-    // A new caller while a request is running waits on that request instead of starting another
-    if (!state.fetching) {
-      state.fetching = fetchCards(state).finally(() => {
-        state.fetching = null;
-      });
-    }
-    await state.fetching;
-    if (state !== search) return;
   }
+
+  state.loading = false;
+  setLoading(false);
+  docLoadMore.disabled = false;
+  docLoadMore.textContent = "Load more";
+  // Hidden once everything is shown, or if the search failed before showing anything
+  docLoadMore.hidden = !state.shownAny || (state.exhausted && state.groups.size === 0);
 }
 
 async function fetchCards(state) {
@@ -204,11 +197,8 @@ async function fetchCards(state) {
   if (json.has_more && json.next_page) {
     state.nextURL = json.next_page;
   } else {
-    state.nextURL = null;
     state.exhausted = true;
   }
-
-  takeReadyPages(state);
 }
 
 function addCard(state, card) {
@@ -228,6 +218,21 @@ function addCard(state, card) {
   group.cards.push(card);
 }
 
+// The waiting set to show next: the most recent, as listed by Scryfall's set list
+function nextGroup(state) {
+  let next = null;
+  state.groups.forEach((group) => {
+    const a = group.set, b = next && next.set;
+    if (!next || a.releasedAt > b.releasedAt || (a.releasedAt === b.releasedAt && a.index < b.index)) next = group;
+  });
+  return next;
+}
+
+// A set has all its cards once the results have moved on to cards released before it
+function isComplete(state, group) {
+  return state.exhausted || group.set.releasedAt > state.streamDate;
+}
+
 // Within each set, arrange cards by EDHREC rank (unranked cards last, alphabetically)
 function sortCards(cards) {
   cards.sort((a, b) => {
@@ -238,61 +243,14 @@ function sortCards(cards) {
   });
 }
 
-// Pack set groups into pages without splitting a group: a group that would overflow the page starts the next one
-function buildPages(groups, maxCards) {
-  const pages = [];
-  let page = null;
-  groups.forEach((group) => {
-    if (!page || (page.cardCount > 0 && page.cardCount + group.cards.length > maxCards)) {
-      page = { groups: [], cardCount: 0 };
-      pages.push(page);
-    }
-    page.groups.push(group);
-    page.cardCount += group.cards.length;
-  });
-  return pages;
-}
-
-// Move pages that can no longer change from the waiting groups onto state.pages
-function takeReadyPages(state) {
-  // Display sets most recent first, as listed by Scryfall's set list
-  const waiting = [...state.groups.values()].sort((a, b) =>
-    a.set.releasedAt === b.set.releasedAt ? a.set.index - b.set.index : (a.set.releasedAt < b.set.releasedAt ? 1 : -1));
-
-  // A set is complete once the results have moved on to cards released before it.
-  // Complete sets come first in display order, so they're the only ones that can be paged yet.
-  const isComplete = (group) => state.exhausted || group.set.releasedAt > state.streamDate;
-  let completeCount = waiting.findIndex((group) => !isComplete(group));
-  if (completeCount === -1) completeCount = waiting.length;
-  const complete = waiting.slice(0, completeCount);
-  const nextGroup = waiting[completeCount];
-
-  // Packing is greedy, so every page but the last is final; the last one may still gain groups
-  const built = buildPages(complete, MAX_CARDS_PER_PAGE);
-  let ready = state.exhausted ? built.length : Math.max(built.length - 1, 0);
-
-  // The last page is also final once the next set, still loading, can no longer fit on it
-  const lastPage = built[built.length - 1];
-  if (!state.exhausted && lastPage && nextGroup && lastPage.cardCount + nextGroup.cards.length > MAX_CARDS_PER_PAGE) {
-    ready = built.length;
-  }
-
-  built.slice(0, ready).forEach((page) => {
-    page.groups.forEach((group) => {
-      sortCards(group.cards);
-      state.groups.delete(group.code);
-    });
-    state.pages.push(page);
-  });
-}
-
-// Print card images, grouped by set, ordered by EDHREC rank, as one collapsible section per set
-function renderPage(page) {
-  docCardList.insertAdjacentHTML("beforeend", page.groups.map(({ set, cards }) => `
+// Print a set's card images, ordered by EDHREC rank, as a collapsible section
+function renderGroup({ set, cards }) {
+  sortCards(cards);
+  docCardList.insertAdjacentHTML("beforeend", `
     <details class="set">
       <summary>${set.name} <strong>(${cards.length})</strong>${set.isUnreleased ? ' <span class="unreleased">(unreleased)</span>' : ""}</summary>
       <div>${cards.map(cardHTML).join("")}</div>
-    </details>`).join(""));
+    </details>`);
 }
 
 // The image is held in data-src until its set is opened
