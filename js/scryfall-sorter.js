@@ -62,6 +62,8 @@ window.onload = () => {
           const entry = {
             code: set.code,
             name: set.name,
+            index: sets.length,
+            releasedAt: set.released_at || "",
             isReleased
           };
           sets.push(entry);
@@ -138,9 +140,8 @@ function newSearch(query, page) {
     query,
     page,               // Index of the page the user wants to see
     pages: [],          // Pages fetched so far; each is final once it's here
-    groups: [],         // Complete set groups not yet placed on a page
-    current: null,      // Set group still receiving cards
-    seenSets: new Set(),
+    groups: new Map(),  // Set groups not yet placed on a page, by set code
+    streamDate: null,   // Release date of the oldest card fetched so far
     nextURL: null,      // Scryfall page to resume from
     exhausted: false,   // True once Scryfall has no more results
     fetching: null,     // Promise for the Scryfall request in flight
@@ -158,7 +159,7 @@ function doSearch(query, page, updateHistory) {
   search = newSearch(query, page);
   if (updateHistory) updateURL(false);
 
-  const searchURI = encodeURIComponent(query + " is:firstprint order:set -is:digital");
+  const searchURI = encodeURIComponent(query + " is:firstprint order:released dir:desc -is:digital");
   search.nextURL = `https://api.scryfall.com/cards/search?q=${searchURI}`;
 
   goToPage(page, false);
@@ -252,8 +253,6 @@ async function fetchCards(state) {
   } else {
     state.nextURL = null;
     state.exhausted = true;
-    if (state.current) completeGroup(state, state.current);
-    state.current = null;
   }
 
   takeReadyPages(state);
@@ -263,19 +262,17 @@ function addCard(state, card) {
   const set = setsByCode[card.set];
   if (!set) return;
 
-  // order:set returns each set's cards together, so a new set means the previous group is complete
-  if (!state.current || state.current.set !== set) {
-    if (state.current) completeGroup(state, state.current);
-    if (state.seenSets.has(set.code)) console.warn(`Cards from ${set.code} weren't returned together; it will appear twice.`);
-    state.seenSets.add(set.code);
-    state.current = { set, cards: [] };
+  // Results come newest first, so every set released after this card's date has all its cards by now
+  if (card.released_at && (!state.streamDate || card.released_at < state.streamDate)) {
+    state.streamDate = card.released_at;
   }
-  state.current.cards.push(card);
-}
 
-function completeGroup(state, group) {
-  sortCards(group.cards);
-  state.groups.push(group);
+  let group = state.groups.get(set.code);
+  if (!group) {
+    group = { set, cards: [] };
+    state.groups.set(set.code, group);
+  }
+  group.cards.push(card);
 }
 
 // Within each set, arrange cards by EDHREC rank (unranked cards last, alphabetically)
@@ -305,19 +302,34 @@ function buildPages(groups, maxCards) {
 
 // Move pages that can no longer change from the waiting groups onto state.pages
 function takeReadyPages(state) {
+  // Display sets most recent first, as listed by Scryfall's set list
+  const waiting = [...state.groups.values()].sort((a, b) =>
+    a.set.releasedAt === b.set.releasedAt ? a.set.index - b.set.index : (a.set.releasedAt < b.set.releasedAt ? 1 : -1));
+
+  // A set is complete once the results have moved on to cards released before it.
+  // Complete sets come first in display order, so they're the only ones that can be paged yet.
+  const isComplete = (group) => state.exhausted || group.set.releasedAt > state.streamDate;
+  let completeCount = waiting.findIndex((group) => !isComplete(group));
+  if (completeCount === -1) completeCount = waiting.length;
+  const complete = waiting.slice(0, completeCount);
+  const nextGroup = waiting[completeCount];
+
   // Packing is greedy, so every page but the last is final; the last one may still gain groups
-  const built = buildPages(state.groups, MAX_CARDS_PER_PAGE);
+  const built = buildPages(complete, MAX_CARDS_PER_PAGE);
   let ready = state.exhausted ? built.length : Math.max(built.length - 1, 0);
 
-  // The last page is also final once the group still loading can no longer fit on it
+  // The last page is also final once the next set, still loading, can no longer fit on it
   const lastPage = built[built.length - 1];
-  if (!state.exhausted && lastPage && state.current && lastPage.cardCount + state.current.cards.length > MAX_CARDS_PER_PAGE) {
+  if (!state.exhausted && lastPage && nextGroup && lastPage.cardCount + nextGroup.cards.length > MAX_CARDS_PER_PAGE) {
     ready = built.length;
   }
 
   built.slice(0, ready).forEach((page) => {
+    page.groups.forEach((group) => {
+      sortCards(group.cards);
+      state.groups.delete(group.set.code);
+    });
     state.pages.push(page);
-    state.groups.splice(0, page.groups.length);
   });
 }
 
