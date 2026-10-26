@@ -23,11 +23,12 @@ div#page-wrapper {
 /* Search & results */
 input#search-box {
   width: 500px;
+  margin: 10px 0 10px 0;
 }
 
 span.small-text {
   font-size: 0.75em;
-  color: #999;
+  color: #777;
 }
 
 div#search-error {
