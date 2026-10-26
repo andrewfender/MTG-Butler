@@ -58,7 +58,7 @@ section.set div.set-content {
 section.set > input[type="checkbox"]:checked ~ div.set-content {
   overflow: visible;
   height: auto;
-  
+
   padding: 10px;
   background: #444;
 }
