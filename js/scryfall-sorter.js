@@ -36,6 +36,15 @@ window.onload = () => {
 
   docLoadMore.addEventListener("click", loadMore);
 
+  // Card images only load once their set is expanded; collapsed sets would otherwise still download them
+  docCardList.addEventListener("change", (event) => {
+    if (!event.target.checked) return;
+    event.target.closest("section.set").querySelectorAll("img[data-src]").forEach((img) => {
+      img.src = img.dataset.src;
+      img.removeAttribute("data-src");
+    });
+  });
+
   // Back/forward buttons restore the search from the URL
   window.addEventListener("popstate", loadFromURL);
 
@@ -327,7 +336,7 @@ function renderPage(page) {
       }
 
       // Print card
-      cards += `<div class="card"><a href="${card.scryfall_uri}" target="_blank"><img loading="lazy" src=${imgSrc}><div class="card-highlight"></div></img></a></div>`;
+      cards += `<div class="card"><a href="${card.scryfall_uri}" target="_blank"><img loading="lazy" data-src=${imgSrc}><div class="card-highlight"></div></img></a></div>`;
     });
     const setUnreleasedNotice = set.isReleased === false ? "<span style='color:#888'>(unreleased)</span>" : "";
 
