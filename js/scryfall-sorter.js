@@ -1,99 +1,72 @@
-var sets = [];
-var setsByCode = {};
-var gotSets = false;
-
-// State of the current search (see newSearch); null until the first search
-var search = null;
-var searchCount = 0;
-
-var docSpinner;
-var spinnerTimer;
-var docCardList;
-var docResultsCounter;
-var docSearchBox;
-var docSearchError;
-var docLoadMore;
-const dateNow = Date.now();
 const fetchOptions = { headers: { "Accept": "application/json" } };
 
 // Results load a page at a time. Pages hold at most this many cards, except a single set larger than
 // this, which gets a page of its own.
 const MAX_CARDS_PER_PAGE = 200;
 
-window.onload = () => {
-  docSpinner = document.getElementById("loading-spinner");
-  docCardList = document.getElementById("card-list");
-  docResultsCounter = document.getElementById("results-counter");
-  docSearchBox = document.getElementById("search-box");
-  docSearchError = document.getElementById("search-error");
-  docLoadMore = document.getElementById("load-more");
+// The script is deferred, so the page is already parsed
+const docSpinner = document.getElementById("loading-spinner");
+const docCardList = document.getElementById("card-list");
+const docResultsCounter = document.getElementById("results-counter");
+const docSearchBox = document.getElementById("search-box");
+const docSearchError = document.getElementById("search-error");
+const docLoadMore = document.getElementById("load-more");
 
-  const searchButton = document.getElementById("search-button");
-  searchButton.addEventListener("click", (event) => {
-    event.preventDefault();
-    doSearch(docSearchBox.value.trim(), true);
+let spinnerTimer;
+
+// State of the current search (see newSearch); null until the first search
+let search = null;
+
+// Fetch all sets, in Scryfall's order (most recent first). Searches don't wait for this to start their
+// first request; they only wait for it before sorting cards into sets.
+const setsByCode = {};
+const setsLoaded = fetch("https://api.scryfall.com/sets", fetchOptions)
+.then((response) => {
+  if (!response.ok) {
+    throw new Error(`Couldn't load the set list from Scryfall (HTTP ${response.status}).`);
+  }
+  return response.json();
+})
+.then((json) => {
+  const today = new Date().toISOString().slice(0, 10);
+  json.data.forEach((set, index) => {
+    setsByCode[set.code] = {
+      name: set.name,
+      index,
+      releasedAt: set.released_at || "",
+      isUnreleased: set.released_at > today
+    };
   });
+});
+setsLoaded.catch((error) => showError(error.message));
 
-  docLoadMore.addEventListener("click", loadMore);
+document.getElementById("search-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  doSearch(docSearchBox.value.trim(), true);
+});
 
-  // Card images only load once their set is expanded; collapsed sets would otherwise still download them
-  docCardList.addEventListener("change", (event) => {
-    if (!event.target.checked) return;
-    event.target.closest("section.set").querySelectorAll("img[data-src]").forEach((img) => {
-      img.src = img.dataset.src;
-      img.removeAttribute("data-src");
-    });
+docLoadMore.addEventListener("click", loadMore);
+
+// Card images only load once their set is opened; closed sets would otherwise still download them.
+// The toggle event doesn't bubble, so it's caught on the way down instead.
+docCardList.addEventListener("toggle", (event) => {
+  if (!event.target.open) return;
+  event.target.querySelectorAll("img[data-src]").forEach((img) => {
+    img.src = img.dataset.src;
+    img.removeAttribute("data-src");
   });
+}, true);
 
-  // Back/forward buttons restore the search from the URL
-  window.addEventListener("popstate", loadFromURL);
+// Back/forward buttons restore the search from the URL
+window.addEventListener("popstate", loadFromURL);
 
-  // Fetch all (main) sets in reverse chronological order
-  console.log("Fetching sets...");
-  setLoading(true);
-
-  console.log(Date());
-
-  fetch("https://api.scryfall.com/sets", fetchOptions)
-  .then((response) => {
-    if (!response.ok) {
-      throw new Error(`Couldn't load the set list from Scryfall (HTTP ${response.status}).`);
-    }
-
-    return response.json()
-    .then((json) => {
-      json.data.forEach((set) => {
-        if (set.code) {
-          const isReleased = set.released_at && Date.parse(set.released_at) <= dateNow;
-          const entry = {
-            code: set.code,
-            name: set.name,
-            index: sets.length,
-            releasedAt: set.released_at || "",
-            isReleased
-          };
-          sets.push(entry);
-          setsByCode[set.code] = entry;
-        }
-      });
-    })
-    .then(() => {
-      gotSets = true;
-      setLoading(false);
-
-      console.log(`Done fetching ${sets.length} sets.`);
-
-      // Run the search linked in the URL, if any
-      loadFromURL();
-    });
-  })
-  .catch((error) => showError(error.message));
-};
+// Run the search linked in the URL, if any
+loadFromURL();
 
 function setLoading(loading) {
   // Only show the spinner if loading takes a moment, so quick loads don't flash it
   clearTimeout(spinnerTimer);
-  if (loading === true) {
+  if (loading) {
     spinnerTimer = setTimeout(() => docSpinner.classList.add("visible"), 250);
   } else {
     docSpinner.classList.remove("visible");
@@ -107,10 +80,7 @@ function showError(message) {
 
 // URL format: ?q=<search>
 function loadFromURL() {
-  if (!gotSets) return;
-
-  const params = new URLSearchParams(window.location.search);
-  const query = (params.get("q") || "").trim();
+  const query = (new URLSearchParams(window.location.search).get("q") || "").trim();
 
   docSearchBox.value = query;
   if (query === "") {
@@ -124,13 +94,12 @@ function loadFromURL() {
 function clearResults() {
   docCardList.innerHTML = "";
   docSearchError.textContent = "";
-  docResultsCounter.innerHTML = `Results: 0`;
+  docResultsCounter.textContent = "Results: 0";
   docLoadMore.hidden = true;
 }
 
 function newSearch(query) {
   return {
-    id: ++searchCount,
     query,
     pages: [],          // Pages fetched so far; each is final once it's here
     shownPages: 0,      // Pages already added to the list
@@ -139,19 +108,17 @@ function newSearch(query) {
     nextURL: null,      // Scryfall page to resume from
     exhausted: false,   // True once Scryfall has no more results
     fetching: null,     // Promise for the Scryfall request in flight
-    lastFetch: 0,
-    totalCards: 0
+    lastFetch: 0
   };
 }
 
 function doSearch(query, updateHistory) {
-  if (!gotSets) return;
-  if (!query || query === "") return;
+  if (query === "") return;
 
   // Any fetches still running for an earlier search stop when they see this new state
   clearResults();
   search = newSearch(query);
-  if (updateHistory) history.pushState(null, "", `${window.location.pathname}?${new URLSearchParams({ q: query })}`);
+  if (updateHistory) history.pushState(null, "", `?${new URLSearchParams({ q: query })}`);
 
   const searchURI = encodeURIComponent(query + " is:firstprint order:released dir:desc -is:digital");
   search.nextURL = `https://api.scryfall.com/cards/search?q=${searchURI}`;
@@ -215,9 +182,10 @@ async function fetchCards(state) {
   if (state !== search) return;
 
   state.lastFetch = Date.now();
-  console.log(`Fetching ${state.nextURL}`);
-  const response = await fetch(state.nextURL, fetchOptions);
-  const json = await response.json();
+  const [json] = await Promise.all([
+    fetch(state.nextURL, fetchOptions).then((response) => response.json()),
+    setsLoaded
+  ]);
   if (state !== search) return;
 
   if (json.object === "error") {
@@ -229,8 +197,7 @@ async function fetchCards(state) {
     throw new Error(json.details);
   }
 
-  state.totalCards = json.total_cards;
-  docResultsCounter.innerHTML = `Results: ${state.totalCards}`;
+  docResultsCounter.textContent = `Results: ${json.total_cards}`;
 
   json.data.forEach((card) => addCard(state, card));
 
@@ -253,17 +220,17 @@ function addCard(state, card) {
     state.streamDate = card.released_at;
   }
 
-  let group = state.groups.get(set.code);
+  let group = state.groups.get(card.set);
   if (!group) {
-    group = { set, cards: [] };
-    state.groups.set(set.code, group);
+    group = { code: card.set, set, cards: [] };
+    state.groups.set(card.set, group);
   }
   group.cards.push(card);
 }
 
 // Within each set, arrange cards by EDHREC rank (unranked cards last, alphabetically)
 function sortCards(cards) {
-  return cards.sort((a, b) => {
+  cards.sort((a, b) => {
     const rankA = a.edhrec_rank ?? Infinity;
     const rankB = b.edhrec_rank ?? Infinity;
     if (rankA !== rankB) return rankA - rankB;
@@ -313,45 +280,24 @@ function takeReadyPages(state) {
   built.slice(0, ready).forEach((page) => {
     page.groups.forEach((group) => {
       sortCards(group.cards);
-      state.groups.delete(group.set.code);
+      state.groups.delete(group.code);
     });
     state.pages.push(page);
   });
 }
 
+// Print card images, grouped by set, ordered by EDHREC rank, as one collapsible section per set
 function renderPage(page) {
-  // Print card images, grouped by set, ordered by EDHREC rank
-  page.groups.forEach((group) => {
-    const set = group.set;
+  docCardList.insertAdjacentHTML("beforeend", page.groups.map(({ set, cards }) => `
+    <details class="set">
+      <summary>${set.name} <strong>(${cards.length})</strong>${set.isUnreleased ? ' <span class="unreleased">(unreleased)</span>' : ""}</summary>
+      <div>${cards.map(cardHTML).join("")}</div>
+    </details>`).join(""));
+}
 
-    // Create list of card divs
-    var cards = "";
-    group.cards.forEach((card) => {
-      // Get card front image
-      let imgSrc = "#";
-      if (card.image_uris) {
-        imgSrc = card.image_uris.normal;
-      } else if (card.card_faces && card.card_faces.length > 0 && card.card_faces[0].image_uris) {
-        imgSrc = card.card_faces[0].image_uris.normal;
-      }
-
-      // Print card
-      cards += `<div class="card"><a href="${card.scryfall_uri}" target="_blank"><img loading="lazy" data-src=${imgSrc}><div class="card-highlight"></div></img></a></div>`;
-    });
-    const setUnreleasedNotice = set.isReleased === false ? "<span style='color:#888'>(unreleased)</span>" : "";
-
-    // Create collapsible section containing cards
-    docCardList.insertAdjacentHTML("beforeend",
-    `
-    <section class="set">
-      <input id=${set.code} type="checkbox" name="collapse"/>
-      <label for=${set.code}><span class="collapse-arrow"></span> ${set.name} <strong>(${group.cards.length})</strong> ${setUnreleasedNotice}</label>
-
-      <div class="set-content">
-      ${cards}
-      </div>
-    </section>
-    `
-    );
-  });
+// The image is held in data-src until its set is opened
+function cardHTML(card) {
+  // Double-faced cards keep their images on each face; show the front
+  const image = (card.image_uris || card.card_faces?.[0]?.image_uris)?.normal || "";
+  return `<a class="card" href="${card.scryfall_uri}" target="_blank"><img loading="lazy" data-src="${image}"></a>`;
 }
