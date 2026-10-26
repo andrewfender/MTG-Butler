@@ -5,13 +5,17 @@ var cards = [];
 var docPageOverlay;
 var docCardList;
 var docResultsCounter;
+var docSearchBox;
+var docSearchError;
 const dateNow = Date.now();
+const fetchOptions = { headers: { "Accept": "application/json" } };
 
 window.onload = () => {
   docPageOverlay = document.getElementById("page-overlay");
   docCardList = document.getElementById("card-list");
   docResultsCounter = document.getElementById("results-counter");
   docSearchBox = document.getElementById("search-box");
+  docSearchError = document.getElementById("search-error");
   
   const searchButton = document.getElementById("search-button");
   searchButton.addEventListener("click", (event) => {
@@ -28,17 +32,16 @@ window.onload = () => {
   
   console.log(Date());
   
-  fetch("https://api.scryfall.com/sets")
+  fetch("https://api.scryfall.com/sets", fetchOptions)
   .then((response) => {
     if (!response.ok) {
-      setLoading(false);
-      throw new Error(response.status);
+      throw new Error(`Couldn't load the set list from Scryfall (HTTP ${response.status}).`);
     }
     
-    response.json()
+    return response.json()
     .then((json) => {        
       json.data.forEach((set) => {
-        if (set.code && set.code.length && set.code.length == 3) {
+        if (set.code) {
           const isReleased = set.released_at && Date.parse(set.released_at) <= dateNow;
           sets.push({
             code: set.code,
@@ -49,13 +52,14 @@ window.onload = () => {
         }
       });
     })
-    .then(setTimeout(() => {
+    .then(() => {
       gotSets = true;
       setLoading(false);
       
       console.log(`Done fetching ${sets.length} sets.`);
-    }, 100));
-  });
+    });
+  })
+  .catch((error) => showError(error.message));
 };
 
 function setLoading(loading) {
@@ -64,6 +68,11 @@ function setLoading(loading) {
 
 function setLoadPercentage(percentage) {
   docPageOverlay.innerHTML = `${percentage.toFixed(0)}%`;
+}
+
+function showError(message) {
+  setLoading(false);
+  docSearchError.textContent = message;
 }
 
 function doSearch() {
@@ -75,6 +84,7 @@ function doSearch() {
     set.cards = [];
   });
   docCardList.innerHTML = "";
+  docSearchError.textContent = "";
   
   const searchURI = encodeURIComponent(docSearchBox.value + " is:firstprint order:set -is:digital");
   
@@ -88,17 +98,17 @@ function doSearch() {
 function fetchCards(searchURL, cardsLoaded) {
   // Fetch all cards matching the search, recur through all pages
   setTimeout(() => {
-    fetch(searchURL)
+    fetch(searchURL, fetchOptions)
     .then((response) => {
-      if (!response.ok) {
-        setLoading(false);
-        throw new Error(response.status);
-      }
-      
-      let getMore = false;
-      let totalCards = 0;
-      response.json()
+      return response.json()
       .then((json) => {
+        if (json.object === "error") {
+          // 404 means no matches; 400 means a bad query. Both carry a readable message.
+          throw new Error(json.status === 404 ? "No cards found." : json.details);
+        }
+        
+        let getMore = false;
+        let totalCards = 0;
         if (totalCards === 0) {
           totalCards = json.total_cards;
           docResultsCounter.innerHTML = `Results: ${totalCards}`;
@@ -118,25 +128,30 @@ function fetchCards(searchURL, cardsLoaded) {
           getMore = true;
           fetchCards(json.next_page, cardsLoaded);
         }
-      })
-      .then(() => {
+        
         if (!getMore) {
           console.log(`Printing ${totalCards} cards, sorted across ${sets.length} sets...`);
           
           printCards();
         }
       });
-    });
-  }, 50);
+    })
+    .catch((error) => showError(error.message || "Couldn't reach Scryfall. Please try again."));
+  }, 100);
 }
 
 function printCards() {
   setLoadPercentage(100);
   
-  // Within each set, arrange cards by EDHREC rank
+  // Within each set, arrange cards by EDHREC rank (unranked cards last, alphabetically)
   sets.forEach((set) => {
     if (set.cards.length > 0) {
-      set.cards = set.cards.sort((a, b) => a.edhrec_rank - b.edhrec_rank);
+      set.cards = set.cards.sort((a, b) => {
+        const rankA = a.edhrec_rank ?? Infinity;
+        const rankB = b.edhrec_rank ?? Infinity;
+        if (rankA !== rankB) return rankA - rankB;
+        return a.name.localeCompare(b.name);
+      });
     }
   });
   
