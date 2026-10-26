@@ -27,6 +27,7 @@ const setsLoaded = fetch("https://api.scryfall.com/sets", fetchOptions)
   const today = new Date().toISOString().slice(0, 10);
   json.data.forEach((set, index) => {
     setsByCode[set.code] = {
+      code: set.code,
       name: set.name,
       index,
       releasedAt: set.released_at || "",
@@ -95,13 +96,13 @@ function clearResults() {
 }
 
 function newSearch(query) {
+  const searchURI = encodeURIComponent(query + " is:firstprint order:released dir:desc -is:digital");
   return {
     query,
     groups: new Map(),  // Set groups fetched but not yet shown, by set code
     streamDate: null,   // Release date of the oldest card fetched so far
-    nextURL: null,      // Scryfall page to resume from
+    nextURL: `https://api.scryfall.com/cards/search?q=${searchURI}`,  // Scryfall page to resume from
     exhausted: false,   // True once Scryfall has no more results
-    loading: false,     // True while a page is loading
     lastFetch: 0
   };
 }
@@ -113,20 +114,14 @@ function doSearch(query, updateHistory) {
   clearResults();
   search = newSearch(query);
   if (updateHistory) history.pushState(null, "", `?${new URLSearchParams({ q: query })}`);
-
-  const searchURI = encodeURIComponent(query + " is:firstprint order:released dir:desc -is:digital");
-  search.nextURL = `https://api.scryfall.com/cards/search?q=${searchURI}`;
-
   loadMore();
 }
 
 // Show the next page of results. Each page is one Scryfall request (175 cards) and shows every set that
 // request completes; a request in the middle of a large set completes none, so another one follows.
+// The Load more button is disabled meanwhile, so only one page loads at a time.
 async function loadMore() {
   const state = search;
-  if (!state || state.loading) return;
-
-  state.loading = true;
   setLoading(true);
   docLoadMore.disabled = true;
   docLoadMore.textContent = "Loading...";
@@ -139,7 +134,7 @@ async function loadMore() {
       let group;
       while ((group = nextGroup(state)) && isComplete(state, group)) {
         renderGroup(group);
-        state.groups.delete(group.code);
+        state.groups.delete(group.set.code);
         shown++;
       }
     } while (shown === 0 && !state.exhausted);
@@ -150,7 +145,6 @@ async function loadMore() {
     showError(error.message || "Couldn't reach Scryfall. Please try again.");
   }
 
-  state.loading = false;
   setLoading(false);
   docLoadMore.disabled = false;
   docLoadMore.textContent = "Load more";
@@ -184,11 +178,8 @@ async function fetchCards(state) {
 
   json.data.forEach((card) => addCard(state, card));
 
-  if (json.has_more && json.next_page) {
-    state.nextURL = json.next_page;
-  } else {
-    state.exhausted = true;
-  }
+  state.nextURL = json.next_page;
+  state.exhausted = !json.has_more;
 }
 
 function addCard(state, card) {
@@ -200,10 +191,10 @@ function addCard(state, card) {
     state.streamDate = card.released_at;
   }
 
-  let group = state.groups.get(card.set);
+  let group = state.groups.get(set.code);
   if (!group) {
-    group = { code: card.set, set, cards: [] };
-    state.groups.set(card.set, group);
+    group = { set, cards: [] };
+    state.groups.set(set.code, group);
   }
   group.cards.push(card);
 }
