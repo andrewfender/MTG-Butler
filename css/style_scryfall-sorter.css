@@ -98,3 +98,41 @@ div.card img:hover {
 #search-error {
   color: #c33;
 }
+
+/* Pagination */
+div.pager {
+  margin: 10px 0;
+  font-size: 0.9em;
+}
+
+div.pager button {
+  min-width: 2.5em;
+  margin: 0 3px 5px 0;
+  padding: 5px 8px;
+  background: #333;
+  color: #bbb;
+  border: 1px solid #000;
+  cursor: pointer;
+}
+div.pager button:hover:not(:disabled), div.pager button.current-page {
+  background: #444;
+  color: #fff;
+}
+div.pager button:disabled {
+  color: #555;
+  cursor: default;
+}
+
+span.pager-gap {
+  margin: 0 6px 0 3px;
+}
+
+div.pager-summary {
+  font-size: 0.8em;
+  color: #999;
+}
+
+div.page-loading {
+  padding: 20px;
+  text-align: center;
+}
