@@ -6,7 +6,8 @@ var gotSets = false;
 var search = null;
 var searchCount = 0;
 
-var docPageOverlay;
+var docSpinner;
+var spinnerTimer;
 var docCardList;
 var docResultsCounter;
 var docSearchBox;
@@ -19,7 +20,7 @@ const fetchOptions = { headers: { "Accept": "application/json" } };
 const MAX_CARDS_PER_PAGE = 200;
 
 window.onload = () => {
-  docPageOverlay = document.getElementById("page-overlay");
+  docSpinner = document.getElementById("loading-spinner");
   docCardList = document.getElementById("card-list");
   docResultsCounter = document.getElementById("results-counter");
   docSearchBox = document.getElementById("search-box");
@@ -45,6 +46,7 @@ window.onload = () => {
 
   // Fetch all (main) sets in reverse chronological order
   console.log("Fetching sets...");
+  setLoading(true);
 
   console.log(Date());
 
@@ -85,7 +87,13 @@ window.onload = () => {
 };
 
 function setLoading(loading) {
-  docPageOverlay.className = loading === true ? "load-overlay" : "";
+  // Only show the spinner if loading takes a moment, so quick loads don't flash it
+  clearTimeout(spinnerTimer);
+  if (loading === true) {
+    spinnerTimer = setTimeout(() => docSpinner.classList.add("visible"), 250);
+  } else {
+    docSpinner.classList.remove("visible");
+  }
 }
 
 function showError(message) {
@@ -181,7 +189,6 @@ function goToPage(page, updateHistory) {
   // Fetch from where the last page left off until the requested page is complete
   if (updateHistory) window.scrollTo(0, 0);
   setLoading(true);
-  docPageOverlay.innerHTML = "Loading...";
   ensurePage(state, state.page)
   .then(() => {
     // Ignore if the user has since moved on to a page that's still loading
