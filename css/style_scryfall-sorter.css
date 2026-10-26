@@ -94,3 +94,7 @@ div.card img {
 div.card img:hover {
   opacity: 0.8;
 }
+
+#search-error {
+  color: #c33;
+}
