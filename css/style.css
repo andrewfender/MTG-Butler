@@ -1,0 +1,106 @@
+body {
+  background: #222;
+  color: #bbb;
+  font-family: sans-serif;
+}
+
+a {
+  color: #fff;
+}
+a:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+hr {
+  border-style: solid;
+}
+
+div#page-wrapper {
+  max-width: 1050px;
+  margin: 20px auto;
+}
+
+/* Search & results */
+input#search-box {
+  width: 500px;
+}
+
+span.small-text {
+  font-size: 0.75em;
+  color: #999;
+}
+
+div#search-error {
+  color: #c33;
+}
+
+div#results-bar {
+  font-size: 0.8em;
+  margin-bottom: 10px;
+}
+
+/* Collapsible sets */
+details.set {
+  background: #333;
+  border: 1px solid #000;
+}
+
+details.set summary {
+  padding: 10px;
+  cursor: pointer;
+}
+details.set summary:hover {
+  background: #444;
+  color: #fff;
+}
+
+details.set > div {
+  padding: 10px;
+  background: #444;
+}
+
+span.unreleased {
+  color: #888;
+}
+
+/* Cards */
+a.card {
+  display: inline-block;
+  width: 250px;
+  height: 348px;
+  margin-right: 5px;
+  border-radius: 12px;
+}
+a.card:hover {
+  background: #fff;
+}
+
+a.card img {
+  width: 100%;
+  border-radius: 12px;
+}
+a.card img:hover {
+  opacity: 0.8;
+}
+
+/* Loading spinner */
+span#loading-spinner {
+  display: none;
+  width: 0.8em;
+  height: 0.8em;
+  margin-left: 6px;
+  vertical-align: -0.1em;
+  border: 2px solid #555;
+  border-top-color: #bbb;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+span#loading-spinner.visible {
+  display: inline-block;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
